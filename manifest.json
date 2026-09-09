@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "b0des.workspace-thumbs",
+  "name": "Workspace Thumbs",
+  "version": "1.0.0",
+  "author": "b0des",
+  "license": "MIT",
+  "description": "Workspace switcher that paints each desktop as a tiny screenshot icon with its number on top. Hover still opens the large preview.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "omarchy": {
+    "clonedFrom": "io.github.bubblepaxi.workspace-preview"
+  },
+  "barWidget": {
+    "displayName": "Workspace Thumbs",
+    "description": "Bar icons are live-ish workspace screenshots with the desktop number overlaid. Hover for a larger preview.",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}
