@@ -20,6 +20,20 @@ Or clone into `~/.config/omarchy/plugins/b0des.workspace-thumbs`.
 - Number badge is drawn above the shot. Focused desktop gets an accent border.
 - Snapshots refresh when you land on a desktop, then freeze until you leave and come back.
 
+## iconMode (experimental)
+
+Off by default. Set on the bar entry in `~/.config/omarchy/shell.json`:
+
+```json
+{ "id": "b0des.workspace-thumbs", "iconMode": "single" }
+```
+
+- `off` — screenshots only
+- `single` — one app icon (largest window on that desktop) to the right of the number
+- `all` — up to three unique app icons
+
+Hover preview stays screenshot-only. Icons come from Hyprland `class` via the icon theme (cached). Hidden/unmapped windows are skipped.
+
 Files: `~/.cache/omarchy/workspace-previews/`
 
 ## Shortcut

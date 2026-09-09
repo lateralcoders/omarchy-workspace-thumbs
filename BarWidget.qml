@@ -14,6 +14,12 @@ BarWidget {
   property int hoveredWorkspaceId: -1
   property var displayedIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   property var previewEpochs: ({})
+  property var iconCache: ({})
+  readonly property string iconMode: {
+    var value = String(setting("iconMode", "off") || "off").toLowerCase()
+    if (value === "all" || value === "single") return value
+    return "off"
+  }
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string previewDir: Model.previewDirectory(root.home)
@@ -135,6 +141,29 @@ BarWidget {
     return Model.previewUrlWithRev(root.previewDir, id, root.epochFor(id))
   }
 
+  function lookupIcon(klass) {
+    var names = Model.iconLookupNames(klass)
+    for (var i = 0; i < names.length; i++) {
+      var path = Quickshell.iconPath(names[i], true)
+      if (path && path.length) return path
+    }
+    return Quickshell.iconPath("application-x-executable", true)
+  }
+
+  function iconForClass(klass) {
+    return Model.cachedIcon(root.iconCache, klass, root.lookupIcon)
+  }
+
+  function iconsForWorkspace(id) {
+    if (root.iconMode === "off") return []
+    var ws = root.workspaceById(id)
+    var tops = ws && ws.toplevels ? ws.toplevels.values : []
+    var classes = Model.classesForToplevels(tops, root.iconMode, 3)
+    var urls = []
+    for (var i = 0; i < classes.length; i++) urls.push(root.iconForClass(classes[i]))
+    return urls
+  }
+
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
   function closeForPopoutSwitch() {
@@ -143,8 +172,8 @@ BarWidget {
   }
 
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
-  readonly property real openPanelIndicatorWidth: grid.implicitWidth
-  readonly property real openPanelIndicatorHeight: grid.implicitHeight
+  readonly property real openPanelIndicatorWidth: 0
+  readonly property real openPanelIndicatorHeight: 0
 
   implicitWidth: root.vertical ? root.barSize : grid.implicitWidth + trailingGap
   implicitHeight: root.barSize
@@ -230,6 +259,11 @@ BarWidget {
     readonly property int epoch: root.epochFor(modelData)
     readonly property string label: root.workspaceLabel(modelData)
     readonly property string liveUrl: root.shotUrlFor(modelData, occupied)
+    readonly property var appIcons: {
+      var _count = workspace && workspace.toplevels ? workspace.toplevels.values.length : 0
+      if (root.iconMode === "off" || _count < 0) return []
+      return root.iconsForWorkspace(modelData)
+    }
     property bool showA: true
     property string pendingUrl: ""
 
@@ -344,37 +378,58 @@ BarWidget {
         sourceSize.height: Math.max(1, frame.height)
       }
 
-      Rectangle {
-        id: numberBadge
+      Row {
         z: 10
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 2
-        width: numberLabel.implicitWidth + 6
-        height: numberLabel.implicitHeight + 2
-        radius: 2
-        color: Qt.rgba(0, 0, 0, thumb.focused ? 0.72 : 0.55)
+        spacing: 2
 
-        Text {
-          id: numberLabel
-          anchors.centerIn: parent
-          text: thumb.label
-          color: "#f4f4f5"
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          font.bold: true
-          renderType: Text.NativeRendering
+        Rectangle {
+          id: numberBadge
+          width: numberLabel.implicitWidth + 6
+          height: numberLabel.implicitHeight + 2
+          radius: 2
+          color: Qt.rgba(0, 0, 0, thumb.focused ? 0.72 : 0.55)
+
+          Text {
+            id: numberLabel
+            anchors.centerIn: parent
+            text: thumb.label
+            color: "#f4f4f5"
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            renderType: Text.NativeRendering
+          }
+        }
+
+        Repeater {
+          model: thumb.appIcons
+          Image {
+            required property var modelData
+            width: 12
+            height: 12
+            source: String(modelData || "")
+            sourceSize.width: 16
+            sourceSize.height: 16
+            asynchronous: true
+            cache: true
+            smooth: true
+            fillMode: Image.PreserveAspectFit
+          }
         }
       }
 
       Rectangle {
+        z: 11
         anchors.fill: parent
         color: "transparent"
         radius: frameRadius
-        border.width: thumb.focused ? 2 : (thumb.hovered ? 1 : 1)
+        border.width: thumb.focused ? 2 : 1
         border.color: thumb.focused
           ? Color.accent
-          : (thumb.hovered ? Qt.rgba(1, 1, 1, 0.45) : Qt.rgba(1, 1, 1, 0.14))
+          : (thumb.hovered ? Qt.rgba(1, 1, 1, 0.7) : Qt.rgba(1, 1, 1, 0.38))
       }
     }
 

@@ -35,6 +35,10 @@ class BarThumbTests(unittest.TestCase):
         self.assertIn("id: bufB", BAR)
         self.assertIn("function acceptBuffer", BAR)
 
+    def test_screenshot_thumbs_keep_a_visible_outline(self):
+        self.assertIn("z: 11", BAR)
+        self.assertIn("openPanelIndicatorWidth: 0", BAR)
+
     def test_thumbs_live_in_the_bar(self):
         self.assertIn("id: grid", BAR)
         self.assertNotIn("PanelWindow", BAR)
@@ -65,6 +69,12 @@ class LiveCaptureTests(unittest.TestCase):
     def test_hover_preview_shows_workspace_number(self):
         self.assertIn("id: hoverNumber", PANEL)
         self.assertIn("selectedWorkspaceId", PANEL)
+
+    def test_icon_mode_defaults_off_and_accepts_single(self):
+        self.assertIn('setting("iconMode", "off")', BAR)
+        self.assertIn("iconsForWorkspace", BAR)
+        self.assertIn("iconForClass", BAR)
+        self.assertIn("appIcons", BAR)
 
     def test_capture_is_scaled_jpeg(self):
         script = (ROOT / "capture-workspace-preview.sh").read_text()
