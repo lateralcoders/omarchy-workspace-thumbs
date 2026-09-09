@@ -154,11 +154,14 @@ BarWidget {
   onBarChanged: injectPanel()
   Component.onCompleted: root.syncDisplayedIds()
 
-  Timer {
-    interval: 2000
-    running: true
-    repeat: true
-    onTriggered: root.syncDisplayedIds()
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (!event) return
+      var name = String(event.name || "")
+      if (name.indexOf("workspace") === -1 && name.indexOf("focusedmon") === -1) return
+      root.syncDisplayedIds()
+    }
   }
 
   Loader {
@@ -288,12 +291,7 @@ BarWidget {
     HoverHandler {
       id: thumbHover
       onHoveredChanged: {
-        if (hovered) {
-          if (root.bar) root.bar.showTooltip(thumb, "Workspace " + root.workspaceLabel(modelData))
-          root.setPreviewWorkspace(modelData)
-        } else if (root.bar) {
-          root.bar.hideTooltip(thumb)
-        }
+        if (hovered) root.setPreviewWorkspace(modelData)
       }
     }
 
@@ -329,8 +327,8 @@ BarWidget {
         smooth: true
         z: thumb.showA ? 2 : 1
         opacity: thumb.occupied && thumb.showA && status === Image.Ready ? 1 : 0
-        sourceSize.width: Math.max(1, frame.width * 2)
-        sourceSize.height: Math.max(1, frame.height * 2)
+        sourceSize.width: Math.max(1, frame.width)
+        sourceSize.height: Math.max(1, frame.height)
       }
 
       Image {
@@ -342,8 +340,8 @@ BarWidget {
         smooth: true
         z: thumb.showA ? 1 : 2
         opacity: thumb.occupied && !thumb.showA && status === Image.Ready ? 1 : 0
-        sourceSize.width: Math.max(1, frame.width * 2)
-        sourceSize.height: Math.max(1, frame.height * 2)
+        sourceSize.width: Math.max(1, frame.width)
+        sourceSize.height: Math.max(1, frame.height)
       }
 
       Rectangle {

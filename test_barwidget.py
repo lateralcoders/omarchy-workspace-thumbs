@@ -47,11 +47,9 @@ class BarThumbTests(unittest.TestCase):
 
 
 class LiveCaptureTests(unittest.TestCase):
-    def test_live_timer_does_not_recapture_on_a_loop(self):
-        self.assertIn("id: liveThumbTimer", PANEL)
-        idx = PANEL.find("id: liveThumbTimer")
-        block = PANEL[idx : idx + 250]
-        self.assertIn("running: false", block)
+    def test_does_not_poll_workspace_ids_on_a_timer(self):
+        self.assertNotIn("interval: 2000", BAR)
+        self.assertIn("onRawEvent", BAR)
 
     def test_model_can_cache_bust_preview_urls(self):
         self.assertIn("function previewUrlWithRev", MODEL)
@@ -67,6 +65,12 @@ class LiveCaptureTests(unittest.TestCase):
     def test_hover_preview_shows_workspace_number(self):
         self.assertIn("id: hoverNumber", PANEL)
         self.assertIn("selectedWorkspaceId", PANEL)
+
+    def test_capture_is_scaled_jpeg(self):
+        script = (ROOT / "capture-workspace-preview.sh").read_text()
+        self.assertIn("grim -t jpeg", script)
+        self.assertIn("-s 0.2", script)
+        self.assertNotIn("preview-helper.py", script)
 
 
 if __name__ == "__main__":

@@ -21,9 +21,6 @@ Panel {
   property var captureStamps: ({})
   property string shotSource: ""
   property bool pendingRefresh: false
-  property bool layoutPollPending: false
-  property string lastLayoutFingerprint: ""
-  property int jpegReadId: -1
   property int windowBorderSize: 2
   property color windowBorderColor: Color.accent
   readonly property int frameWidth: Math.max(1, root.windowBorderSize)
@@ -31,7 +28,6 @@ Panel {
   readonly property string home: Quickshell.env("HOME")
   readonly property string previewDir: Model.previewDirectory(root.home)
   readonly property string wallpaperUrl: Model.wallpaperUrl(root.home)
-  readonly property string helperScript: String(Qt.resolvedUrl("preview-helper.py")).replace(/^file:\/\//, "")
   readonly property string captureScript: String(Qt.resolvedUrl("capture-workspace-preview.sh")).replace(/^file:\/\//, "")
   readonly property int focusId: Hyprland.focusedWorkspace !== null ? Hyprland.focusedWorkspace.id : -1
   readonly property var barWindow: root.hostWidget && root.hostWidget.QsWindow ? root.hostWidget.QsWindow.window : null
@@ -61,86 +57,6 @@ Panel {
     return mapped.name === Hyprland.focusedMonitor.name
   }
 
-  function isLayoutEvent(name) {
-    name = String(name || "")
-    if (!name) return false
-    if (name === "windowtitle" || name === "windowtitlev2") return false
-    if (name === "activewindow" || name === "activewindowv2") return false
-    if (name === "urgent" || name === "screencast" || name === "screencastv2") return false
-    if (name === "activelayout") return false
-    return name === "openwindow"
-      || name === "closewindow"
-      || name.indexOf("movewindow") === 0
-      || name.indexOf("swapwindow") === 0
-      || name.indexOf("fullscreen") === 0
-      || name === "changefloatingmode"
-      || name.indexOf("workspace") === 0
-      || name.indexOf("focusedmon") === 0
-      || name.indexOf("group") !== -1
-      || name === "pin"
-      || name.indexOf("minimize") !== -1
-      || name === "configreloaded"
-  }
-
-  function layoutFingerprint(clientsText) {
-    var clients
-    try { clients = JSON.parse(clientsText || "[]") } catch (e) { return "" }
-    if (!clients || !clients.length) return "empty"
-    var parts = []
-    for (var i = 0; i < clients.length; i++) {
-      var c = clients[i]
-      if (!c || c.mapped === false || c.hidden === true) continue
-      var ws = c.workspace && c.workspace.id !== undefined ? c.workspace.id : "?"
-      var at = c.at || [0, 0]
-      var size = c.size || [0, 0]
-      parts.push([c.address || "", ws, at[0], at[1], size[0], size[1], c.class || "", c.floating ? 1 : 0, c.fullscreen || 0].join(","))
-    }
-    parts.sort()
-    return parts.join("|")
-  }
-
-  function pollLayout() {
-    if (!root.opened) {
-      root.layoutPollPending = false
-      return
-    }
-    if (layoutProc.running) {
-      root.layoutPollPending = true
-      return
-    }
-    layoutProc.running = false
-    layoutProc.command = ["python3", root.helperScript, "run", "1000", "1048576", "--", "hyprctl", "-j", "clients"]
-    layoutProc.running = true
-  }
-
-  function scheduleRefresh() {
-    windowCaptureTimer.restart()
-  }
-
-  function parseHyprlandColor(raw) {
-    var s = String(raw || "").replace(/^\s+|\s+$/g, "")
-    if (!s) return ""
-    var parts = s.split(/\s+/)
-    for (var i = 0; i < parts.length; i++) {
-      var part = parts[i]
-      if (part.match(/deg$/)) continue
-      if (part.match(/^[0-9A-Fa-f]{8}$/)) return "#" + part.substring(2)
-      if (part.charAt(0) === "#" && part.length >= 7) return part.substring(0, 7)
-      var rgba = part.match(/^rgba\(([0-9A-Fa-f]{6})/i)
-      if (rgba) return "#" + rgba[1]
-      var rgb = part.match(/^rgb\(([0-9A-Fa-f]{6})\)/i)
-      if (rgb) return "#" + rgb[1]
-    }
-    return ""
-  }
-
-  function refreshWindowBorder() {
-    if (borderOptProc.running) return
-    borderOptProc.running = false
-    borderOptProc.command = ["python3", root.helperScript, "run", "1000", "16384", "--", "sh", "-c", "hyprctl -j getoption general:border_size; printf '\\n'; hyprctl -j getoption general:col.active_border"]
-    borderOptProc.running = true
-  }
-
   function workspaceOccupied(id) {
     var values = Hyprland.workspaces.values
     for (var i = 0; i < values.length; i++) {
@@ -148,6 +64,13 @@ Panel {
       if (ws && ws.id === id) return ws.toplevels.values.length > 0
     }
     return false
+  }
+
+  function shotUrl(workspaceId) {
+    var epoch = 0
+    if (root.hostWidget && root.hostWidget.epochFor)
+      epoch = root.hostWidget.epochFor(workspaceId)
+    return Model.previewUrlWithRev(root.previewDir, workspaceId, epoch)
   }
 
   function showWorkspace(workspaceId, anchor) {
@@ -162,14 +85,7 @@ Panel {
       root.shotSource = root.wallpaperUrl
       return
     }
-    root.loadValidatedShot(workspaceId)
-  }
-
-  function loadValidatedShot(workspaceId) {
-    root.jpegReadId = workspaceId
-    jpegReadProc.running = false
-    jpegReadProc.command = ["python3", root.helperScript, "read", Model.previewPath(root.previewDir, workspaceId)]
-    jpegReadProc.running = true
+    root.shotSource = root.shotUrl(workspaceId)
   }
 
   function markCaptured(id) {
@@ -178,11 +94,12 @@ Panel {
     next[id] = Date.now()
     root.captureStamps = next
     if (root.hostWidget && root.hostWidget.noteCaptured) root.hostWidget.noteCaptured(id)
+    if (root.opened && root.selectedWorkspaceId === id) root.setShot(id)
   }
 
   function recentlyCaptured(id) {
     var stamp = root.captureStamps[id]
-    return !!stamp && (Date.now() - stamp) < 1800
+    return !!stamp && (Date.now() - stamp) < 2500
   }
 
   function openForWorkspace(workspaceId, anchor) {
@@ -228,6 +145,7 @@ Panel {
   function captureWorkspace(id, force) {
     if (id <= 0) return
     if (!force && !root.onFocusedOutput()) return
+    if (!force && root.recentlyCaptured(id)) return
     if (root.overlayOnScreen()) return
     if (root.captureQueued || captureProc.running) {
       root.pendingRefresh = true
@@ -253,24 +171,11 @@ Panel {
     settleTimer.restart()
   }
 
-  Timer {
-    id: settleTimer
-    interval: 450
-    repeat: false
-    onTriggered: {
-      if (root.overlayOnScreen()) return
-      root.captureWorkspace(root.currentWorkspaceId(), true)
-    }
-  }
-
   onOpenedChanged: {
     if (root.opened) {
-      root.refreshWindowBorder()
       root.abortCapture()
       return
     }
-    root.layoutPollPending = false
-    root.scheduleRefresh()
   }
 
   Component.onCompleted: {
@@ -279,11 +184,13 @@ Panel {
     settleTimer.restart()
   }
 
-  Connections {
-    target: Hyprland
-    function onRawEvent(event) {
-      if (!event) return
-      if (event.name === "configreloaded") root.refreshWindowBorder()
+  Timer {
+    id: settleTimer
+    interval: 400
+    repeat: false
+    onTriggered: {
+      if (root.overlayOnScreen()) return
+      root.captureWorkspace(root.currentWorkspaceId(), true)
     }
   }
 
@@ -298,29 +205,6 @@ Panel {
   }
 
   Timer {
-    id: windowCaptureTimer
-    interval: 420
-    repeat: false
-    onTriggered: {
-      if (root.overlayOnScreen()) return
-      root.captureWorkspace(root.currentWorkspaceId())
-    }
-  }
-
-  Timer {
-    id: liveThumbTimer
-    interval: 2800
-    running: false
-    repeat: true
-    onTriggered: {
-      if (root.overlayOnScreen()) return
-      var id = root.currentWorkspaceId()
-      if (root.recentlyCaptured(id)) return
-      root.captureWorkspace(id)
-    }
-  }
-
-  Timer {
     id: stallTimer
     interval: 2000
     repeat: false
@@ -328,90 +212,6 @@ Panel {
       captureProc.running = false
       root.captureQueued = false
       root.capturingId = -1
-      root.scheduleRefresh()
-    }
-  }
-
-  Timer {
-    id: layoutPollTimer
-    interval: 120
-    running: root.opened
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: root.pollLayout()
-  }
-
-  Process {
-    id: jpegReadProc
-    command: ["python3", "-c", "raise SystemExit(1)"]
-    running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var requestedId = root.jpegReadId
-        var b64 = String(text || "").replace(/\s+/g, "")
-        if (requestedId !== root.selectedWorkspaceId) return
-        if (!b64) {
-          root.shotSource = root.wallpaperUrl
-          return
-        }
-        root.shotSource = "data:image/jpeg;base64," + b64
-      }
-    }
-    onExited: function(exitCode) {
-      if (exitCode === 0) return
-      if (root.jpegReadId !== root.selectedWorkspaceId) return
-      root.shotSource = root.wallpaperUrl
-    }
-  }
-
-  Process {
-    id: borderOptProc
-    command: ["python3", "-c", "raise SystemExit(1)"]
-    running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var blobs = String(text || "").match(/\{[\s\S]*?\}/g) || []
-        for (var i = 0; i < blobs.length; i++) {
-          var data
-          try { data = JSON.parse(blobs[i]) } catch (e) { continue }
-          if (!data) continue
-          if (data.int !== undefined && String(data.option || "").indexOf("border_size") !== -1) {
-            var size = Number(data.int)
-            if (isFinite(size) && size >= 0) root.windowBorderSize = Math.round(size)
-          }
-          var raw = data.gradient || data.custom || data.str || ""
-          var parsed = root.parseHyprlandColor(raw)
-          if (parsed) root.windowBorderColor = parsed
-        }
-      }
-    }
-    onExited: borderOptProc.running = false
-  }
-
-  Process {
-    id: layoutProc
-    command: ["python3", "-c", "raise SystemExit(1)"]
-    running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var next = root.layoutFingerprint(text)
-        if (!next || next === root.lastLayoutFingerprint) return
-        root.lastLayoutFingerprint = next
-        root.scheduleRefresh()
-      }
-    }
-    onExited: function(exitCode) {
-      layoutProc.running = false
-      if (exitCode !== 0) {
-        root.layoutPollPending = false
-        return
-      }
-      if (!root.layoutPollPending) return
-      root.layoutPollPending = false
-      if (root.opened) Qt.callLater(root.pollLayout)
     }
   }
 
@@ -429,8 +229,6 @@ Panel {
         return
       }
       root.markCaptured(capturedId)
-      if (root.selectedWorkspaceId === capturedId && !root.overlayOnScreen())
-        root.loadValidatedShot(capturedId)
       if (root.pendingRefresh) Qt.callLater(function() { root.captureWorkspace(root.currentWorkspaceId()) })
     }
   }
@@ -462,12 +260,12 @@ Panel {
           id: shot
           anchors.fill: parent
           source: root.shotSource
-          sourceSize.width: Math.max(1, root.previewWidth * 2)
-          sourceSize.height: Math.max(1, root.previewHeight * 2)
+          sourceSize.width: Math.max(1, root.previewWidth)
+          sourceSize.height: Math.max(1, root.previewHeight)
           fillMode: Image.PreserveAspectFit
           smooth: true
-          asynchronous: false
-          cache: false
+          asynchronous: true
+          cache: true
           onStatusChanged: {
             if (status !== Image.Error) return
             if (root.shotSource === root.wallpaperUrl) return
