@@ -35,6 +35,11 @@ class BarThumbTests(unittest.TestCase):
         self.assertIn("id: bufB", BAR)
         self.assertIn("function acceptBuffer", BAR)
 
+    def test_focus_ring_tracks_an_explicit_focus_id(self):
+        self.assertIn("property int focusId", BAR)
+        self.assertIn("function refreshFocus", BAR)
+        self.assertIn("root.focusId === modelData", BAR)
+
     def test_screenshot_thumbs_keep_a_visible_outline(self):
         self.assertIn("z: 11", BAR)
         self.assertIn("openPanelIndicatorWidth: 0", BAR)
@@ -45,7 +50,8 @@ class BarThumbTests(unittest.TestCase):
         self.assertNotIn("PopupWindow", BAR)
 
     def test_does_not_claim_the_original_plugin_id(self):
-        self.assertIn('moduleName: "b0des.workspace-thumbs"', BAR)
+        self.assertIn('moduleName: "io.github.lateralcoders.workspace-thumbs"', BAR)
+        self.assertNotIn("b0des", BAR)
         self.assertNotIn("io.github.bubblepaxi.workspace-preview", BAR)
         self.assertNotIn("io.github.bubblepaxi.workspace-preview", PANEL)
 
@@ -71,7 +77,7 @@ class LiveCaptureTests(unittest.TestCase):
         self.assertIn("selectedWorkspaceId", PANEL)
 
     def test_icon_mode_defaults_off_and_accepts_single(self):
-        self.assertIn('setting("iconMode", "off")', BAR)
+        self.assertIn('setting("iconMode", "single")', BAR)
         self.assertIn("iconsForWorkspace", BAR)
         self.assertIn("iconForClass", BAR)
         self.assertIn("appIcons", BAR)

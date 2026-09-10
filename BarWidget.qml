@@ -9,16 +9,17 @@ import "Model.js" as Model
 
 BarWidget {
   id: root
-  moduleName: "b0des.workspace-thumbs"
+  moduleName: "io.github.lateralcoders.workspace-thumbs"
 
   property int hoveredWorkspaceId: -1
   property var displayedIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   property var previewEpochs: ({})
   property var iconCache: ({})
+  property int focusId: 0
   property int wallpaperRev: 1
   property string wallpaperResolved: ""
   readonly property string iconMode: {
-    var value = String(setting("iconMode", "off") || "off").toLowerCase()
+    var value = String(setting("iconMode", "single") || "single").toLowerCase()
     if (value === "all" || value === "single") return value
     return "off"
   }
@@ -77,13 +78,21 @@ BarWidget {
   }
 
   function currentWorkspaceId() {
+    if (root.focusId > 0) return root.focusId
     if (Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id > 0)
       return Hyprland.focusedWorkspace.id
     return 1
   }
 
+  function refreshFocus() {
+    var ws = Hyprland.focusedWorkspace
+    var id = (ws && ws.id > 0) ? ws.id : 0
+    if (id > 0 && id !== root.focusId) root.focusId = id
+  }
+
   function focusWorkspace(id) {
     if (panelLoader.item) panelLoader.item.close()
+    if (id > 0) root.focusId = id
     if (!root.bar) return
     root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = \"" + id + "\" })"))
   }
@@ -219,16 +228,19 @@ BarWidget {
   onBarChanged: injectPanel()
   Component.onCompleted: {
     root.syncDisplayedIds()
+    root.refreshFocus()
     root.refreshWallpaper()
   }
 
   Connections {
     target: Hyprland
+    function onFocusedWorkspaceChanged() { root.refreshFocus() }
     function onRawEvent(event) {
       if (!event) return
       var name = String(event.name || "")
       if (name === "configreloaded") root.refreshWallpaper()
       if (name.indexOf("workspace") === -1 && name.indexOf("focusedmon") === -1) return
+      root.refreshFocus()
       root.syncDisplayedIds()
     }
   }
@@ -326,7 +338,7 @@ BarWidget {
 
     readonly property var workspace: root.workspaceById(modelData)
     readonly property bool occupied: workspace !== null && workspace.toplevels.values.length > 0
-    readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === modelData
+    readonly property bool focused: root.focusId === modelData
     readonly property bool hovered: thumbHover.hovered
     readonly property bool tooltipHovered: visible && interactive && hovered
     readonly property int epoch: root.epochFor(modelData)
@@ -362,8 +374,6 @@ BarWidget {
       target: bufB
       function onStatusChanged() { thumb.acceptBuffer("B") }
     }
-
-
 
     implicitWidth: root.vertical ? root.barSize : root.thumbWidth
     implicitHeight: root.vertical ? root.thumbHeight : root.barSize

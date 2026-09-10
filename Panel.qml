@@ -8,8 +8,8 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "b0des.workspace-thumbs"
-  ipcTarget: "b0des.workspace-thumbs"
+  moduleName: "io.github.lateralcoders.workspace-thumbs"
+  ipcTarget: "io.github.lateralcoders.workspace-thumbs"
   manageIpc: false
 
   property var anchorItem: null
