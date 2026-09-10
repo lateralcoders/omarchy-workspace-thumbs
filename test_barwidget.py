@@ -28,7 +28,7 @@ class BarThumbTests(unittest.TestCase):
         self.assertIn("previewUrlWithRev", BAR)
         self.assertIn("hostWidget.noteCaptured", PANEL)
         self.assertNotIn("previewGeneration", BAR)
-        self.assertNotIn("FileView", BAR)
+        self.assertIn("wallpaperRev", BAR)
 
     def test_holds_last_shot_while_next_jpeg_loads(self):
         self.assertIn("id: bufA", BAR)
@@ -75,6 +75,13 @@ class LiveCaptureTests(unittest.TestCase):
         self.assertIn("iconsForWorkspace", BAR)
         self.assertIn("iconForClass", BAR)
         self.assertIn("appIcons", BAR)
+
+    def test_empty_desktops_follow_current_wallpaper(self):
+        self.assertIn("applyWallpaperPath", BAR)
+        self.assertIn("wallpaperResolved", BAR)
+        self.assertIn("readlink", BAR)
+        self.assertIn("onExited: root.applyWallpaperPath", BAR)
+        self.assertIn("epochFor(id) > 0", BAR)
 
     def test_capture_is_scaled_jpeg(self):
         script = (ROOT / "capture-workspace-preview.sh").read_text()

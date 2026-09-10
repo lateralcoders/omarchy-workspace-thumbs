@@ -27,7 +27,9 @@ Panel {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string previewDir: Model.previewDirectory(root.home)
-  readonly property string wallpaperUrl: Model.wallpaperUrl(root.home)
+  readonly property string wallpaperUrl: root.hostWidget && root.hostWidget.wallpaperUrl
+    ? root.hostWidget.wallpaperUrl
+    : Model.wallpaperUrl(root.home)
   readonly property string captureScript: String(Qt.resolvedUrl("capture-workspace-preview.sh")).replace(/^file:\/\//, "")
   readonly property int focusId: Hyprland.focusedWorkspace !== null ? Hyprland.focusedWorkspace.id : -1
   readonly property var barWindow: root.hostWidget && root.hostWidget.QsWindow ? root.hostWidget.QsWindow.window : null
@@ -81,11 +83,16 @@ Panel {
   }
 
   function setShot(workspaceId) {
-    if (!(workspaceId > 0 && root.workspaceOccupied(workspaceId))) {
+    if (workspaceId <= 0) {
       root.shotSource = root.wallpaperUrl
       return
     }
-    root.shotSource = root.shotUrl(workspaceId)
+    var epoch = root.hostWidget && root.hostWidget.epochFor ? root.hostWidget.epochFor(workspaceId) : 0
+    if (root.workspaceOccupied(workspaceId) || epoch > 0) {
+      root.shotSource = root.shotUrl(workspaceId)
+      return
+    }
+    root.shotSource = root.wallpaperUrl
   }
 
   function markCaptured(id) {
@@ -146,7 +153,7 @@ Panel {
     if (id <= 0) return
     if (!force && !root.onFocusedOutput()) return
     if (!force && root.recentlyCaptured(id)) return
-    if (root.overlayOnScreen()) return
+    if (!force && root.overlayOnScreen()) return
     if (root.captureQueued || captureProc.running) {
       root.pendingRefresh = true
       return
@@ -176,6 +183,9 @@ Panel {
       root.abortCapture()
       return
     }
+    // Clicking a chip keeps the hover card open, which skips the settle
+    // capture. Recapture once the overlay is gone.
+    settleTimer.restart()
   }
 
   Component.onCompleted: {
@@ -265,7 +275,7 @@ Panel {
           fillMode: Image.PreserveAspectFit
           smooth: true
           asynchronous: true
-          cache: true
+          cache: false
           onStatusChanged: {
             if (status !== Image.Error) return
             if (root.shotSource === root.wallpaperUrl) return

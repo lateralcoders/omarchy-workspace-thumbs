@@ -15,6 +15,8 @@ BarWidget {
   property var displayedIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   property var previewEpochs: ({})
   property var iconCache: ({})
+  property int wallpaperRev: 1
+  property string wallpaperResolved: ""
   readonly property string iconMode: {
     var value = String(setting("iconMode", "off") || "off").toLowerCase()
     if (value === "all" || value === "single") return value
@@ -23,7 +25,11 @@ BarWidget {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string previewDir: Model.previewDirectory(root.home)
-  readonly property string wallpaperUrl: Model.wallpaperUrl(root.home)
+  readonly property string wallpaperStampScript: String(Qt.resolvedUrl("update-wallpaper-stamp.sh")).replace(/^file:\/\//, "")
+  readonly property string wallpaperStampPath: Model.previewDirectory(root.home) + "/wallpaper.path"
+  readonly property string wallpaperUrl: root.wallpaperResolved
+    ? ("file://" + root.wallpaperResolved + "#w=" + wallpaperRev)
+    : ""
   readonly property int thumbPad: Math.max(1, Style.space(1))
   readonly property int thumbGap: Math.max(2, Style.space(2))
   readonly property int thumbInner: Math.max(12, root.barSize - thumbPad * 2)
@@ -137,8 +143,38 @@ BarWidget {
   }
 
   function shotUrlFor(id, occupied) {
-    if (!occupied) return root.wallpaperUrl
-    return Model.previewUrlWithRev(root.previewDir, id, root.epochFor(id))
+    if (occupied || root.epochFor(id) > 0)
+      return Model.previewUrlWithRev(root.previewDir, id, root.epochFor(id))
+    return root.wallpaperUrl
+  }
+
+  function applyWallpaperPath(path) {
+    path = String(path || "").replace(/^\s+|\s+$/g, "")
+    if (!path || path === root.wallpaperResolved) return
+    root.wallpaperResolved = path
+    root.wallpaperRev += 1
+    var kept = {}
+    for (var i = 0; i < root.displayedIds.length; i++) {
+      var id = root.displayedIds[i]
+      var ws = root.workspaceById(id)
+      if (ws && ws.toplevels && ws.toplevels.values.length > 0)
+        kept[String(id)] = root.epochFor(id)
+    }
+    root.previewEpochs = kept
+  }
+
+  function applyWallpaperStamp() {
+    var path = ""
+    try { path = String(wallpaperStamp.text() || "") } catch (e) { path = "" }
+    root.applyWallpaperPath(path)
+  }
+
+  function refreshWallpaper() {
+    wallpaperLinkProc.running = false
+    wallpaperLinkProc.running = true
+    wallpaperStampProc.running = false
+    wallpaperStampProc.command = [root.wallpaperStampScript]
+    wallpaperStampProc.running = true
   }
 
   function lookupIcon(klass) {
@@ -181,16 +217,53 @@ BarWidget {
   readonly property real trailingGap: root.vertical ? 0 : Style.spaceReal(1.5)
 
   onBarChanged: injectPanel()
-  Component.onCompleted: root.syncDisplayedIds()
+  Component.onCompleted: {
+    root.syncDisplayedIds()
+    root.refreshWallpaper()
+  }
 
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       if (!event) return
       var name = String(event.name || "")
+      if (name === "configreloaded") root.refreshWallpaper()
       if (name.indexOf("workspace") === -1 && name.indexOf("focusedmon") === -1) return
       root.syncDisplayedIds()
     }
+  }
+
+  FileView {
+    id: wallpaperStamp
+    path: root.wallpaperStampPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: root.applyWallpaperStamp()
+    onLoaded: root.applyWallpaperStamp()
+  }
+
+  Timer {
+    interval: 500
+    running: true
+    repeat: true
+    onTriggered: root.refreshWallpaper()
+  }
+
+  Process {
+    id: wallpaperLinkProc
+    command: ["readlink", "-f", Model.wallpaperPath(root.home)]
+    running: false
+    stdout: StdioCollector {
+      id: wallpaperStdout
+      waitForEnd: true
+    }
+    onExited: root.applyWallpaperPath(wallpaperStdout.text)
+  }
+
+  Process {
+    id: wallpaperStampProc
+    command: ["true"]
+    running: false
   }
 
   Loader {
@@ -268,7 +341,6 @@ BarWidget {
     property string pendingUrl: ""
 
     onLiveUrlChanged: {
-      if (!occupied) return
       if (liveUrl === pendingUrl) return
       pendingUrl = liveUrl
       if (showA) bufB.source = liveUrl
@@ -347,8 +419,9 @@ BarWidget {
         source: root.wallpaperUrl
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        cache: true
+        cache: false
         smooth: true
+        visible: !thumb.occupied && thumb.epoch <= 0 && root.wallpaperUrl !== ""
         z: 0
       }
 
@@ -360,7 +433,7 @@ BarWidget {
         cache: true
         smooth: true
         z: thumb.showA ? 2 : 1
-        opacity: thumb.occupied && thumb.showA && status === Image.Ready ? 1 : 0
+        opacity: thumb.showA && status === Image.Ready && source != "" ? 1 : 0
         sourceSize.width: Math.max(1, frame.width)
         sourceSize.height: Math.max(1, frame.height)
       }
@@ -373,7 +446,7 @@ BarWidget {
         cache: true
         smooth: true
         z: thumb.showA ? 1 : 2
-        opacity: thumb.occupied && !thumb.showA && status === Image.Ready ? 1 : 0
+        opacity: !thumb.showA && status === Image.Ready && source != "" ? 1 : 0
         sourceSize.width: Math.max(1, frame.width)
         sourceSize.height: Math.max(1, frame.height)
       }

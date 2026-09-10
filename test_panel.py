@@ -34,11 +34,16 @@ class PanelOverlayCaptureTests(unittest.TestCase):
     def test_capture_skips_while_overlay_is_on_screen(self):
         fn = block_after("function captureWorkspace(")
         self.assertIn("overlayOnScreen()", fn)
-        self.assertIn("if (root.overlayOnScreen()) return", fn)
+        self.assertIn("if (!force && root.overlayOnScreen()) return", fn)
+        self.assertNotIn("if (!root.workspaceOccupied(id)) return", fn)
 
     def test_opening_preview_aborts_in_flight_capture(self):
         fn = block_after("onOpenedChanged:")
         self.assertIn("root.abortCapture()", fn)
+
+    def test_closing_preview_recaptures_current_desktop(self):
+        fn = block_after("onOpenedChanged:")
+        self.assertIn("settleTimer.restart()", fn)
 
     def test_notifies_bar_icons_after_capture(self):
         fn = block_after("function markCaptured(")
