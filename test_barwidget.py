@@ -85,32 +85,31 @@ class LiveCaptureTests(unittest.TestCase):
     def test_empty_desktops_follow_current_wallpaper(self):
         self.assertIn("applyWallpaperPath", BAR)
         self.assertIn("wallpaperResolved", BAR)
-        self.assertIn("/usr/bin/readlink", BAR)
-        self.assertIn("onExited: root.applyWallpaperPath", BAR)
+        self.assertIn("stamp-wallpaper", BAR)
+        self.assertIn("id: wallpaperStamp", BAR)
+        self.assertNotIn("readlink", BAR)
         self.assertIn("epochFor(id) > 0", BAR)
 
+    def test_focus_uses_hyprland_ipc_not_hyprctl(self):
+        self.assertIn("Hyprland.dispatch", BAR)
+        self.assertNotIn("bar.run", BAR)
+        self.assertNotIn("hyprctl", BAR)
+
     def test_capture_is_scaled_jpeg(self):
-        script = (ROOT / "capture-workspace-preview.sh").read_text()
         helper = (ROOT / "preview-helper.py").read_text()
-        self.assertIn("preview-helper.py", script)
-        self.assertIn("/usr/bin/python3", script)
-        self.assertIn('PATH="/usr/bin:/bin"', script)
-        self.assertIn("capture", script)
-        self.assertNotIn(".tmp-ws-", script)
-        self.assertNotIn("mktemp", script)
-        self.assertNotIn("/tmp", script)
-        self.assertIn('["grim", "-t", "jpeg", "-q", "45", "-s", "0.2"', helper)
-        self.assertIn("/usr/bin/bash", PANEL)
+        self.assertIn("/usr/bin/python3", PANEL)
+        self.assertIn('"capture"', PANEL)
+        self.assertNotIn(".tmp-ws-", PANEL)
+        self.assertNotIn("mktemp", helper)
+        self.assertNotIn("/tmp", helper)
+        self.assertIn('"-o", monitor, "-"', helper)
+        self.assertIn("ALLOWED_TOOLS", helper)
 
     def test_wallpaper_stamp_uses_safe_publish(self):
-        script = (ROOT / "update-wallpaper-stamp.sh").read_text()
-        self.assertIn("stamp-wallpaper", script)
-        self.assertIn("/usr/bin/python3", script)
-        self.assertIn('PATH="/usr/bin:/bin"', script)
-        self.assertNotIn(".tmp.$$", script)
-        self.assertNotIn(" cat ", script)
-        self.assertNotIn("/tmp", script)
-        self.assertIn("/usr/bin/bash", BAR)
+        self.assertIn("stamp-wallpaper", BAR)
+        self.assertIn("/usr/bin/python3", BAR)
+        self.assertNotIn("readlink", BAR)
+        self.assertNotIn("/tmp", BAR)
 
 
 if __name__ == "__main__":

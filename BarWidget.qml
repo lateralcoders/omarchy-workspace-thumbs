@@ -26,7 +26,7 @@ BarWidget {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string previewDir: Model.previewDirectory(root.home)
-  readonly property string wallpaperStampScript: String(Qt.resolvedUrl("update-wallpaper-stamp.sh")).replace(/^file:\/\//, "")
+  readonly property string helper: String(Qt.resolvedUrl("preview-helper.py")).replace(/^file:\/\//, "")
   readonly property string wallpaperStampPath: Model.previewDirectory(root.home) + "/wallpaper.path"
   readonly property string wallpaperUrl: root.wallpaperResolved
     ? ("file://" + root.wallpaperResolved + "#w=" + wallpaperRev)
@@ -92,9 +92,10 @@ BarWidget {
 
   function focusWorkspace(id) {
     if (panelLoader.item) panelLoader.item.close()
-    if (id > 0) root.focusId = id
-    if (!root.bar) return
-    root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = \"" + id + "\" })"))
+    id = Number(id)
+    if (!(id >= 1 && id <= 20 && id === Math.floor(id))) return
+    root.focusId = id
+    Hyprland.dispatch("hl.dsp.focus({ workspace = \"" + id + "\" })")
   }
 
   function open() {
@@ -179,10 +180,8 @@ BarWidget {
   }
 
   function refreshWallpaper() {
-    wallpaperLinkProc.running = false
-    wallpaperLinkProc.running = true
     wallpaperStampProc.running = false
-    wallpaperStampProc.command = ["/usr/bin/bash", root.wallpaperStampScript]
+    wallpaperStampProc.command = ["/usr/bin/python3", root.helper, "stamp-wallpaper"]
     wallpaperStampProc.running = true
   }
 
@@ -259,17 +258,6 @@ BarWidget {
     running: true
     repeat: true
     onTriggered: root.refreshWallpaper()
-  }
-
-  Process {
-    id: wallpaperLinkProc
-    command: ["/usr/bin/readlink", "-f", Model.wallpaperPath(root.home)]
-    running: false
-    stdout: StdioCollector {
-      id: wallpaperStdout
-      waitForEnd: true
-    }
-    onExited: root.applyWallpaperPath(wallpaperStdout.text)
   }
 
   Process {

@@ -27,17 +27,23 @@ TIMEOUT_EXIT = 124
 PINNED_PATH = "/usr/bin:/bin"
 PINNED_PREFIXES = ("/usr/bin/", "/bin/")
 PREVIEW_REL = (".cache", "omarchy", "workspace-previews")
+LOCAL_STATE_REL = (".local", "state", "omarchy", "current")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+MONITOR_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 WS_SHOT = re.compile(r"^ws-([1-9]|1[0-9]|20)\.jpg$")
-HIJACK_VARS = (
-    "LD_PRELOAD",
-    "LD_LIBRARY_PATH",
-    "LD_AUDIT",
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PYTHONSTARTUP",
-    "BASH_ENV",
-    "ENV",
+ALLOWED_TOOLS = ("hyprctl", "grim")
+CHILD_ENV_KEEP = (
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "XDG_RUNTIME_DIR",
+    "WAYLAND_DISPLAY",
+    "HYPRLAND_INSTANCE_SIGNATURE",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
 )
 
 
@@ -125,10 +131,11 @@ def _pinned_path(path: str) -> bool:
 
 
 def child_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in HIJACK_VARS:
-        env.pop(key, None)
-    env["PATH"] = PINNED_PATH
+    env = {"PATH": PINNED_PATH}
+    for key in CHILD_ENV_KEEP:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
     return env
 
 
@@ -188,26 +195,24 @@ def check_owned_regular(fd: int) -> os.stat_result:
     return info
 
 
-def open_verified_dir(path: str) -> int:
-    """Open $HOME/.cache/omarchy/workspace-previews via openat(NOFOLLOW) from HOME."""
-    path = require_preview_dir(path)
+def walk_from_root(abs_path: str, *, create_under_home: bool, missing_ok: bool = False) -> int:
+    """Open abs_path via openat(NOFOLLOW) from /, never following a component."""
+    abs_path = os.path.abspath(abs_path)
     home = home_root()
+    if abs_path != home and not abs_path.startswith(home + os.sep):
+        fail("path not under home")
+    rel = os.path.relpath(abs_path, "/")
+    if rel.startswith("..") or rel == ".":
+        fail("invalid path")
+    parts = rel.split(os.sep)
+    home_parts = os.path.relpath(home, "/").split(os.sep)
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    except OSError:
-        try:
-            fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-        except OSError:
-            fail("refusing symlink or missing parent directory")
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISDIR(info.st_mode):
-            fail("not a directory")
-        if info.st_uid != os.getuid():
-            fail("unexpected directory owner")
-        for part in PREVIEW_REL:
+        for i, part in enumerate(parts):
             if not part or part in (".", "..") or "/" in part:
                 fail("invalid path component")
+            at_home = i + 1 == len(home_parts)
+            under_home = i >= len(home_parts)
             try:
                 nxt = os.open(
                     part,
@@ -215,6 +220,11 @@ def open_verified_dir(path: str) -> int:
                     dir_fd=fd,
                 )
             except FileNotFoundError:
+                if not (create_under_home and under_home):
+                    if missing_ok:
+                        os.close(fd)
+                        return -1
+                    fail("refusing symlink or missing parent directory")
                 try:
                     os.mkdir(part, 0o700, dir_fd=fd)
                 except FileExistsError:
@@ -234,13 +244,51 @@ def open_verified_dir(path: str) -> int:
             info = os.fstat(fd)
             if not stat.S_ISDIR(info.st_mode):
                 fail("not a directory")
-            if info.st_uid != os.getuid():
-                fail("unexpected directory owner")
-            os.fchmod(fd, 0o700)
+            if at_home or under_home:
+                if info.st_uid != os.getuid():
+                    fail("unexpected directory owner")
+            if create_under_home and under_home:
+                os.fchmod(fd, 0o700)
         return fd
     except BaseException:
         os.close(fd)
         raise
+
+
+def open_verified_dir(path: str) -> int:
+    return walk_from_root(require_preview_dir(path), create_under_home=True)
+
+
+def wallpaper_allowed(path: str) -> bool:
+    path = os.path.abspath(path)
+    home = home_root()
+    if path == home or path.startswith(home + os.sep):
+        return True
+    return path.startswith("/usr/share/")
+
+
+def resolve_background() -> str | None:
+    parent = os.path.join(home_root(), *LOCAL_STATE_REL)
+    dir_fd = walk_from_root(parent, create_under_home=False, missing_ok=True)
+    if dir_fd < 0:
+        return None
+    try:
+        try:
+            target = os.readlink("background", dir_fd=dir_fd)
+        except OSError:
+            return None
+    finally:
+        os.close(dir_fd)
+    if not target or target in (".", "..") or "\n" in target:
+        return None
+    if not os.path.isabs(target):
+        target = os.path.join(parent, target)
+    target = os.path.abspath(target)
+    if not wallpaper_allowed(target):
+        fail("wallpaper not under home or /usr/share")
+    if not os.path.lexists(target):
+        return None
+    return target
 
 
 def exclusive_temp(dir_fd: int) -> tuple[int, str]:
@@ -368,8 +416,26 @@ def stream_capped(argv: list[str], timeout_ms: int, max_bytes: int) -> bytes:
     return bytes(buf)
 
 
+def stream_tool(name: str, args: list[str], timeout_ms: int, max_bytes: int) -> bytes:
+    if name not in ALLOWED_TOOLS or "/" in name:
+        fail("executable not allowed")
+    if name == "hyprctl" and list(args) != ["-j", "monitors"]:
+        fail("hyprctl args not allowed")
+    if name == "grim":
+        if not args or args[-1] != "-":
+            fail("grim must write stdout")
+        if any("/" in part for part in args):
+            fail("grim path argument refused")
+        if "-o" not in args:
+            fail("grim args not allowed")
+        output_name = args[args.index("-o") + 1] if args.index("-o") + 1 < len(args) else ""
+        if not MONITOR_NAME.match(output_name):
+            fail("invalid monitor")
+    return stream_capped([name, *args], timeout_ms, max_bytes)
+
+
 def focused_monitor() -> str:
-    raw = stream_capped(["hyprctl", "-j", "monitors"], 1000, MAX_MONITOR_BYTES)
+    raw = stream_tool("hyprctl", ["-j", "monitors"], 1000, MAX_MONITOR_BYTES)
     try:
         monitors = json.loads(raw.decode())
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -380,7 +446,7 @@ def focused_monitor() -> str:
         if not isinstance(mon, dict) or mon.get("focused") is not True:
             continue
         name = mon.get("name")
-        if isinstance(name, str) and name and "/" not in name and name not in (".", ".."):
+        if isinstance(name, str) and MONITOR_NAME.match(name):
             return name
     fail("no focused monitor")
 
@@ -439,84 +505,6 @@ def cmd_publish(path: str, jpeg: bool) -> None:
     publish_bytes(path, data)
 
 
-def cmd_prepare_dir(path: str) -> None:
-    fd = open_verified_dir(path)
-    os.close(fd)
-
-
-def cmd_stage(directory: str) -> None:
-    dir_fd = open_verified_dir(directory)
-    try:
-        fd, name = exclusive_temp(dir_fd)
-        try:
-            check_owned_regular(fd)
-            os.fchmod(fd, 0o600)
-        finally:
-            os.close(fd)
-        sys.stdout.write(os.path.join(preview_dir(), name) + "\n")
-    finally:
-        os.close(dir_fd)
-
-
-def cmd_commit(tmp: str, dest: str, jpeg: bool) -> None:
-    dest_dir, dest_name = require_preview_file(dest)
-    tmp = os.path.abspath(tmp)
-    tmp_dir = os.path.dirname(tmp)
-    tmp_name = os.path.basename(tmp)
-    if tmp_dir != dest_dir:
-        fail("temp not in destination directory")
-    if not tmp_name.startswith(".pub-") or _invalid_part(tmp_name):
-        fail("temp name not exclusive")
-    dir_fd = open_verified_dir(dest_dir)
-    try:
-        fd = open_regular_nofollow(tmp_name, os.O_RDONLY, dir_fd)
-        try:
-            info = check_owned_regular(fd)
-            if jpeg:
-                if info.st_size > MAX_JPEG_BYTES:
-                    fail("jpeg exceeds byte ceiling", OVERFLOW_EXIT)
-                data = os.read(fd, MAX_JPEG_BYTES + 1)
-                validate_jpeg(data)
-            os.fsync(fd)
-        except BaseException:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            try:
-                os.unlink(tmp_name, dir_fd=dir_fd)
-            except OSError:
-                pass
-            raise
-        os.close(fd)
-        os.rename(tmp_name, dest_name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-    finally:
-        os.close(dir_fd)
-
-
-def cmd_discard(tmp: str) -> None:
-    tmp = os.path.abspath(tmp)
-    directory = os.path.dirname(tmp)
-    name = os.path.basename(tmp)
-    require_preview_dir(directory)
-    if not name.startswith(".pub-") or _invalid_part(name):
-        fail("temp name not exclusive")
-    dir_fd = open_verified_dir(directory)
-    try:
-        fd = open_regular_nofollow(name, os.O_RDONLY, dir_fd)
-        try:
-            check_owned_regular(fd)
-        finally:
-            os.close(fd)
-        os.unlink(name, dir_fd=dir_fd)
-    finally:
-        os.close(dir_fd)
-
-
-def cmd_run(timeout_ms: int, max_bytes: int, argv: list[str]) -> None:
-    sys.stdout.buffer.write(stream_capped(argv, timeout_ms, max_bytes))
-
-
 def cmd_capture(workspace_id: str, dest: str) -> None:
     if not workspace_id.isdigit():
         fail("invalid workspace")
@@ -537,8 +525,9 @@ def cmd_capture(workspace_id: str, dest: str) -> None:
         fd, tmp_name = exclusive_temp(dir_fd)
         check_owned_regular(fd)
         os.fchmod(fd, 0o600)
-        data = stream_capped(
-            ["grim", "-t", "jpeg", "-q", "45", "-s", "0.2", "-o", monitor, "-"],
+        data = stream_tool(
+            "grim",
+            ["-t", "jpeg", "-q", "45", "-s", "0.2", "-o", monitor, "-"],
             2000,
             MAX_JPEG_BYTES,
         )
@@ -566,15 +555,10 @@ def cmd_capture(workspace_id: str, dest: str) -> None:
 
 
 def cmd_stamp_wallpaper() -> None:
-    home = home_root()
-    link = os.path.join(home, ".local", "state", "omarchy", "current", "background")
+    target = resolve_background()
+    if not target:
+        return
     stamp = os.path.join(preview_dir(), "wallpaper.path")
-    try:
-        target = os.path.realpath(link)
-    except OSError:
-        return
-    if not target or not os.path.exists(target):
-        return
     payload = (target + "\n").encode()
     if len(payload) > MAX_TEXT_BYTES:
         fail("payload exceeds byte ceiling", OVERFLOW_EXIT)
@@ -627,8 +611,8 @@ def cmd_stamp_wallpaper() -> None:
 def main(argv: list[str]) -> None:
     if len(argv) < 2:
         fail(
-            "usage: preview-helper.py read|write|run|publish|prepare-dir|stage|"
-            "commit|discard|capture|read-text|stamp-wallpaper ..."
+            "usage: preview-helper.py read|write|publish|"
+            "capture|read-text|stamp-wallpaper ..."
         )
     action = argv[1]
     if action == "read":
@@ -645,31 +629,6 @@ def main(argv: list[str]) -> None:
         if len(argv) != 3:
             fail("usage: preview-helper.py write PATH")
         cmd_write(argv[2])
-        return
-    if action == "prepare-dir":
-        if len(argv) != 3:
-            fail("usage: preview-helper.py prepare-dir DIR")
-        cmd_prepare_dir(argv[2])
-        return
-    if action == "stage":
-        if len(argv) != 3:
-            fail("usage: preview-helper.py stage DIR")
-        cmd_stage(argv[2])
-        return
-    if action == "commit":
-        jpeg = False
-        args = argv[2:]
-        if args and args[0] == "--jpeg":
-            jpeg = True
-            args = args[1:]
-        if len(args) != 2:
-            fail("usage: preview-helper.py commit [--jpeg] TMP DEST")
-        cmd_commit(args[0], args[1], jpeg)
-        return
-    if action == "discard":
-        if len(argv) != 3:
-            fail("usage: preview-helper.py discard TMP")
-        cmd_discard(argv[2])
         return
     if action == "publish":
         jpeg = False
@@ -690,16 +649,6 @@ def main(argv: list[str]) -> None:
         if len(argv) != 2:
             fail("usage: preview-helper.py stamp-wallpaper")
         cmd_stamp_wallpaper()
-        return
-    if action == "run":
-        if len(argv) < 5:
-            fail("usage: preview-helper.py run TIMEOUT_MS MAX_BYTES [--] CMD...")
-        timeout_ms = int(argv[2])
-        max_bytes = int(argv[3])
-        cmd = argv[4:]
-        if cmd and cmd[0] == "--":
-            cmd = cmd[1:]
-        cmd_run(timeout_ms, max_bytes, cmd)
         return
     fail("unknown action")
 

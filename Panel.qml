@@ -30,7 +30,7 @@ Panel {
   readonly property string wallpaperUrl: root.hostWidget && root.hostWidget.wallpaperUrl
     ? root.hostWidget.wallpaperUrl
     : Model.wallpaperUrl(root.home)
-  readonly property string captureScript: String(Qt.resolvedUrl("capture-workspace-preview.sh")).replace(/^file:\/\//, "")
+  readonly property string helper: String(Qt.resolvedUrl("preview-helper.py")).replace(/^file:\/\//, "")
   readonly property int focusId: Hyprland.focusedWorkspace !== null ? Hyprland.focusedWorkspace.id : -1
   readonly property var barWindow: root.hostWidget && root.hostWidget.QsWindow ? root.hostWidget.QsWindow.window : null
   readonly property var previewScreen: root.barWindow ? root.barWindow.screen : null
@@ -163,7 +163,7 @@ Panel {
     root.capturingId = id
     stallTimer.restart()
     captureProc.running = false
-    captureProc.command = ["/usr/bin/bash", root.captureScript, String(id), Model.previewPath(root.previewDir, id)]
+    captureProc.command = ["/usr/bin/python3", root.helper, "capture", String(id), Model.previewPath(root.previewDir, id)]
     captureProc.running = true
   }
 
