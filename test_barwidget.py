@@ -93,7 +93,10 @@ class LiveCaptureTests(unittest.TestCase):
         script = (ROOT / "capture-workspace-preview.sh").read_text()
         self.assertIn("grim -t jpeg", script)
         self.assertIn("-s 0.2", script)
-        self.assertNotIn("preview-helper.py", script)
+        self.assertIn("preview-helper.py", script)
+        self.assertIn('helper" stage', script)
+        self.assertIn("commit --jpeg", script)
+        self.assertNotIn(".tmp-ws-", script)
 
 
 if __name__ == "__main__":

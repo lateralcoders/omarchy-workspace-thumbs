@@ -42,6 +42,55 @@ class PreviewHelperTests(unittest.TestCase):
             self.assertEqual(read.returncode, 0, read.stderr)
             self.assertEqual(__import__("base64").b64decode(read.stdout.strip()), data)
 
+    def test_write_refuses_symlink_directory(self):
+        data = jpeg()
+        with tempfile.TemporaryDirectory() as folder:
+            real = os.path.join(folder, "real")
+            os.mkdir(real, 0o700)
+            link = os.path.join(folder, "linked")
+            os.symlink(real, link)
+            path = os.path.join(link, "ws-1.jpg")
+            write = run_helper("write", path, stdin=data)
+            self.assertNotEqual(write.returncode, 0)
+
+    def test_write_replaces_symlink_dest_atomically(self):
+        data = jpeg()
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            real = os.path.join(folder, "other.jpg")
+            Path(real).write_bytes(b"keep")
+            dest = os.path.join(folder, "ws-1.jpg")
+            os.symlink(real, dest)
+            write = run_helper("write", dest, stdin=data)
+            self.assertEqual(write.returncode, 0, write.stderr)
+            self.assertFalse(os.path.islink(dest))
+            self.assertEqual(Path(dest).read_bytes(), data)
+            self.assertEqual(Path(real).read_bytes(), b"keep")
+
+    def test_stage_commit_jpeg(self):
+        data = jpeg()
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            staged = run_helper("stage", folder)
+            self.assertEqual(staged.returncode, 0, staged.stderr)
+            tmp = staged.stdout.decode().strip()
+            self.assertTrue(os.path.basename(tmp).startswith(".pub-"))
+            Path(tmp).write_bytes(data)
+            dest = os.path.join(folder, "ws-1.jpg")
+            commit = run_helper("commit", "--jpeg", tmp, dest)
+            self.assertEqual(commit.returncode, 0, commit.stderr)
+            self.assertFalse(os.path.exists(tmp))
+            self.assertEqual(Path(dest).read_bytes(), data)
+
+    def test_prepare_dir_refuses_symlink(self):
+        with tempfile.TemporaryDirectory() as folder:
+            real = os.path.join(folder, "real")
+            os.mkdir(real, 0o700)
+            link = os.path.join(folder, "cache")
+            os.symlink(real, link)
+            result = run_helper("prepare-dir", link)
+            self.assertNotEqual(result.returncode, 0)
+
     def test_read_rejects_symlink(self):
         data = jpeg()
         with tempfile.TemporaryDirectory() as folder:

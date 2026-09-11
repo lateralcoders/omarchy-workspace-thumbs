@@ -91,12 +91,48 @@ def cmd_read(path: str) -> None:
     sys.stdout.buffer.write(b"\n")
 
 
-def cmd_write(path: str) -> None:
-    data = sys.stdin.buffer.read(MAX_JPEG_BYTES + 1)
-    data = validate_jpeg(data)
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    fd = open_regular_nofollow(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+def ensure_private_dir(path: str) -> None:
+    path = os.path.abspath(path)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        parent = os.path.dirname(path)
+        if parent and parent != path:
+            if not os.path.isdir(parent):
+                os.makedirs(parent, mode=0o700, exist_ok=True)
+        os.mkdir(path, 0o700)
+        info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode):
+        fail("refusing symlink directory")
+    if not stat.S_ISDIR(info.st_mode):
+        fail("not a directory")
+    if info.st_uid != os.getuid():
+        fail("unexpected directory owner")
+    os.chmod(path, 0o700)
+
+
+def exclusive_temp(directory: str) -> tuple[int, str]:
+    for _ in range(32):
+        name = ".pub-" + os.urandom(8).hex()
+        tmp = os.path.join(directory, name)
+        try:
+            fd = os.open(
+                tmp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+            )
+        except FileExistsError:
+            continue
+        except OSError:
+            fail("refusing symlink or missing path")
+        return fd, tmp
+    fail("could not create exclusive temp")
+
+
+def publish_bytes(path: str, data: bytes) -> None:
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    ensure_private_dir(directory)
+    fd, tmp = exclusive_temp(directory)
     try:
         check_owned_regular(fd)
         os.fchmod(fd, 0o600)
@@ -104,8 +140,84 @@ def cmd_write(path: str) -> None:
         while written < len(data):
             written += os.write(fd, data[written:])
         os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.rename(tmp, path)
+        tmp = ""
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def cmd_write(path: str) -> None:
+    data = sys.stdin.buffer.read(MAX_JPEG_BYTES + 1)
+    data = validate_jpeg(data)
+    publish_bytes(path, data)
+
+
+def cmd_publish(path: str, jpeg: bool) -> None:
+    ceiling = MAX_JPEG_BYTES if jpeg else 4096
+    data = sys.stdin.buffer.read(ceiling + 1)
+    if len(data) > ceiling:
+        fail("payload exceeds byte ceiling", OVERFLOW_EXIT)
+    if jpeg:
+        data = validate_jpeg(data)
+    publish_bytes(path, data)
+
+
+def cmd_prepare_dir(path: str) -> None:
+    ensure_private_dir(path)
+
+
+def cmd_stage(directory: str) -> None:
+    ensure_private_dir(directory)
+    fd, tmp = exclusive_temp(directory)
+    try:
+        check_owned_regular(fd)
+        os.fchmod(fd, 0o600)
     finally:
         os.close(fd)
+    sys.stdout.write(tmp + "\n")
+
+
+def cmd_commit(tmp: str, dest: str, jpeg: bool) -> None:
+    directory = os.path.dirname(os.path.abspath(dest)) or "."
+    ensure_private_dir(directory)
+    if os.path.dirname(os.path.abspath(tmp)) != os.path.abspath(directory):
+        fail("temp not in destination directory")
+    if not os.path.basename(tmp).startswith(".pub-"):
+        fail("temp name not exclusive")
+    fd = open_regular_nofollow(tmp, os.O_RDONLY)
+    try:
+        info = check_owned_regular(fd)
+        if jpeg:
+            if info.st_size > MAX_JPEG_BYTES:
+                fail("jpeg exceeds byte ceiling", OVERFLOW_EXIT)
+            data = os.read(fd, MAX_JPEG_BYTES + 1)
+            validate_jpeg(data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.rename(tmp, dest)
+
+
+def cmd_discard(tmp: str) -> None:
+    if not os.path.basename(tmp).startswith(".pub-"):
+        fail("temp name not exclusive")
+    fd = open_regular_nofollow(tmp, os.O_RDONLY)
+    try:
+        check_owned_regular(fd)
+    finally:
+        os.close(fd)
+    os.unlink(tmp)
 
 
 def cmd_run(timeout_ms: int, max_bytes: int, argv: list[str]) -> None:
@@ -142,6 +254,41 @@ def main(argv: list[str]) -> None:
         if len(argv) != 3:
             fail("usage: preview-helper.py write PATH")
         cmd_write(argv[2])
+        return
+    if action == "prepare-dir":
+        if len(argv) != 3:
+            fail("usage: preview-helper.py prepare-dir DIR")
+        cmd_prepare_dir(argv[2])
+        return
+    if action == "stage":
+        if len(argv) != 3:
+            fail("usage: preview-helper.py stage DIR")
+        cmd_stage(argv[2])
+        return
+    if action == "commit":
+        jpeg = False
+        args = argv[2:]
+        if args and args[0] == "--jpeg":
+            jpeg = True
+            args = args[1:]
+        if len(args) != 2:
+            fail("usage: preview-helper.py commit [--jpeg] TMP DEST")
+        cmd_commit(args[0], args[1], jpeg)
+        return
+    if action == "discard":
+        if len(argv) != 3:
+            fail("usage: preview-helper.py discard TMP")
+        cmd_discard(argv[2])
+        return
+    if action == "publish":
+        jpeg = False
+        args = argv[2:]
+        if args and args[0] == "--jpeg":
+            jpeg = True
+            args = args[1:]
+        if len(args) != 1:
+            fail("usage: preview-helper.py publish [--jpeg] PATH")
+        cmd_publish(args[0], jpeg)
         return
     if action == "run":
         if len(argv) < 5:
