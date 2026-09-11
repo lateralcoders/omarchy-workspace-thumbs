@@ -163,7 +163,7 @@ Panel {
     root.capturingId = id
     stallTimer.restart()
     captureProc.running = false
-    captureProc.command = ["/usr/bin/python3", root.helper, "capture", String(id), Model.previewPath(root.previewDir, id)]
+    captureProc.command = ["/usr/bin/python3", "-I", root.helper, "capture", String(id), Model.previewPath(root.previewDir, id)]
     captureProc.running = true
   }
 
@@ -228,6 +228,16 @@ Panel {
   Process {
     id: captureProc
     command: ["/usr/bin/true"]
+    workingDirectory: "/"
+    clearEnvironment: true
+    environment: ({
+      PATH: "/usr/bin:/bin",
+      HOME: null,
+      XDG_RUNTIME_DIR: null,
+      WAYLAND_DISPLAY: null,
+      HYPRLAND_INSTANCE_SIGNATURE: null,
+      XDG_SESSION_TYPE: null
+    })
     running: false
     onExited: function(exitCode) {
       var capturedId = root.capturingId

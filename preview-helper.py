@@ -139,6 +139,15 @@ def child_env() -> dict[str, str]:
     return env
 
 
+def scrub_runtime_env() -> None:
+    os.environ["PATH"] = PINNED_PATH
+    for key in list(os.environ):
+        if key == "PATH":
+            continue
+        if key.startswith(("PYTHON", "LD_")) or key in ("BASH_ENV", "ENV", "IFS", "CDPATH", "PERL5LIB", "RUBYLIB"):
+            os.environ.pop(key, None)
+
+
 def resolve_cmd(argv: list[str]) -> list[str]:
     if not argv:
         fail("invalid run bounds")
@@ -279,14 +288,18 @@ def resolve_background() -> str | None:
             return None
     finally:
         os.close(dir_fd)
-    if not target or target in (".", "..") or "\n" in target:
+    if not target or target in (".", "..") or "\n" in target or "\0" in target:
         return None
     if not os.path.isabs(target):
         target = os.path.join(parent, target)
     target = os.path.abspath(target)
     if not wallpaper_allowed(target):
         fail("wallpaper not under home or /usr/share")
-    if not os.path.lexists(target):
+    try:
+        info = os.lstat(target)
+    except OSError:
+        return None
+    if not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
         return None
     return target
 
@@ -654,4 +667,5 @@ def main(argv: list[str]) -> None:
 
 
 if __name__ == "__main__":
+    scrub_runtime_env()
     main(sys.argv)

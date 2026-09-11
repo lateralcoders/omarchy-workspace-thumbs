@@ -54,7 +54,7 @@ class PreviewHelperTests(unittest.TestCase):
 
     def run_helper(self, *args, stdin=None, timeout=5, env=None):
         return subprocess.run(
-            ["/usr/bin/python3", str(HELPER), *args],
+            ["/usr/bin/python3", "-I", str(HELPER), *args],
             input=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -367,6 +367,7 @@ class ProductionPathTests(unittest.TestCase):
         self.assertIn("ALLOWED_TOOLS", source)
         self.assertIn('"-o", monitor, "-"', source)
         self.assertIn("os.readlink", source)
+        self.assertIn("def scrub_runtime_env", source)
         self.assertNotIn("subprocess.run(", source)
         self.assertNotIn("def cmd_stage", source)
         self.assertNotIn("def cmd_commit", source)
@@ -380,7 +381,8 @@ class ProductionPathTests(unittest.TestCase):
         stamp = Path(__file__).with_name("update-wallpaper-stamp.sh").read_text()
         for script in (capture, stamp):
             self.assertIn('PATH="/usr/bin:/bin"', script)
-            self.assertIn("/usr/bin/python3", script)
+            self.assertIn("/usr/bin/env -i", script)
+            self.assertIn("/usr/bin/python3 -I", script)
             self.assertIn("#!/usr/bin/bash", script)
             self.assertNotIn("/tmp", script)
             self.assertNotIn("jq", script)

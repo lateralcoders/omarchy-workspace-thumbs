@@ -98,6 +98,8 @@ class LiveCaptureTests(unittest.TestCase):
     def test_capture_is_scaled_jpeg(self):
         helper = (ROOT / "preview-helper.py").read_text()
         self.assertIn("/usr/bin/python3", PANEL)
+        self.assertIn('"-I"', PANEL)
+        self.assertIn("clearEnvironment: true", PANEL)
         self.assertIn('"capture"', PANEL)
         self.assertNotIn(".tmp-ws-", PANEL)
         self.assertNotIn("mktemp", helper)
@@ -108,6 +110,8 @@ class LiveCaptureTests(unittest.TestCase):
     def test_wallpaper_stamp_uses_safe_publish(self):
         self.assertIn("stamp-wallpaper", BAR)
         self.assertIn("/usr/bin/python3", BAR)
+        self.assertIn('"-I"', BAR)
+        self.assertIn("clearEnvironment: true", BAR)
         self.assertNotIn("readlink", BAR)
         self.assertNotIn("/tmp", BAR)
 

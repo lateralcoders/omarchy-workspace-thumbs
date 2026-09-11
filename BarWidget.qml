@@ -181,7 +181,7 @@ BarWidget {
 
   function refreshWallpaper() {
     wallpaperStampProc.running = false
-    wallpaperStampProc.command = ["/usr/bin/python3", root.helper, "stamp-wallpaper"]
+    wallpaperStampProc.command = ["/usr/bin/python3", "-I", root.helper, "stamp-wallpaper"]
     wallpaperStampProc.running = true
   }
 
@@ -263,6 +263,16 @@ BarWidget {
   Process {
     id: wallpaperStampProc
     command: ["/usr/bin/true"]
+    workingDirectory: "/"
+    clearEnvironment: true
+    environment: ({
+      PATH: "/usr/bin:/bin",
+      HOME: null,
+      XDG_RUNTIME_DIR: null,
+      WAYLAND_DISPLAY: null,
+      HYPRLAND_INSTANCE_SIGNATURE: null,
+      XDG_SESSION_TYPE: null
+    })
     running: false
   }
 
