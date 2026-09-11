@@ -85,28 +85,32 @@ class LiveCaptureTests(unittest.TestCase):
     def test_empty_desktops_follow_current_wallpaper(self):
         self.assertIn("applyWallpaperPath", BAR)
         self.assertIn("wallpaperResolved", BAR)
-        self.assertIn("readlink", BAR)
+        self.assertIn("/usr/bin/readlink", BAR)
         self.assertIn("onExited: root.applyWallpaperPath", BAR)
         self.assertIn("epochFor(id) > 0", BAR)
 
     def test_capture_is_scaled_jpeg(self):
         script = (ROOT / "capture-workspace-preview.sh").read_text()
-        self.assertIn("grim -t jpeg", script)
-        self.assertIn("-s 0.2", script)
+        helper = (ROOT / "preview-helper.py").read_text()
         self.assertIn("preview-helper.py", script)
-        self.assertIn('helper" stage', script)
-        self.assertIn("commit --jpeg", script)
-        self.assertIn("prepare-dir", script)
+        self.assertIn("/usr/bin/python3", script)
+        self.assertIn('PATH="/usr/bin:/bin"', script)
+        self.assertIn("capture", script)
         self.assertNotIn(".tmp-ws-", script)
         self.assertNotIn("mktemp", script)
+        self.assertNotIn("/tmp", script)
+        self.assertIn('["grim", "-t", "jpeg", "-q", "45", "-s", "0.2"', helper)
+        self.assertIn("/usr/bin/bash", PANEL)
 
     def test_wallpaper_stamp_uses_safe_publish(self):
         script = (ROOT / "update-wallpaper-stamp.sh").read_text()
-        self.assertIn("prepare-dir", script)
-        self.assertIn("read-text", script)
-        self.assertIn("publish", script)
+        self.assertIn("stamp-wallpaper", script)
+        self.assertIn("/usr/bin/python3", script)
+        self.assertIn('PATH="/usr/bin:/bin"', script)
         self.assertNotIn(".tmp.$$", script)
         self.assertNotIn(" cat ", script)
+        self.assertNotIn("/tmp", script)
+        self.assertIn("/usr/bin/bash", BAR)
 
 
 if __name__ == "__main__":

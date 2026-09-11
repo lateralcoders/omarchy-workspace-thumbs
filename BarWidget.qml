@@ -182,7 +182,7 @@ BarWidget {
     wallpaperLinkProc.running = false
     wallpaperLinkProc.running = true
     wallpaperStampProc.running = false
-    wallpaperStampProc.command = [root.wallpaperStampScript]
+    wallpaperStampProc.command = ["/usr/bin/bash", root.wallpaperStampScript]
     wallpaperStampProc.running = true
   }
 
@@ -263,7 +263,7 @@ BarWidget {
 
   Process {
     id: wallpaperLinkProc
-    command: ["readlink", "-f", Model.wallpaperPath(root.home)]
+    command: ["/usr/bin/readlink", "-f", Model.wallpaperPath(root.home)]
     running: false
     stdout: StdioCollector {
       id: wallpaperStdout
@@ -274,7 +274,7 @@ BarWidget {
 
   Process {
     id: wallpaperStampProc
-    command: ["true"]
+    command: ["/usr/bin/true"]
     running: false
   }
 

@@ -163,7 +163,7 @@ Panel {
     root.capturingId = id
     stallTimer.restart()
     captureProc.running = false
-    captureProc.command = [root.captureScript, String(id), Model.previewPath(root.previewDir, id)]
+    captureProc.command = ["/usr/bin/bash", root.captureScript, String(id), Model.previewPath(root.previewDir, id)]
     captureProc.running = true
   }
 
@@ -227,7 +227,7 @@ Panel {
 
   Process {
     id: captureProc
-    command: ["/bin/sh", "-c", "true"]
+    command: ["/usr/bin/true"]
     running: false
     onExited: function(exitCode) {
       var capturedId = root.capturingId

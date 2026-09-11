@@ -46,9 +46,8 @@ Already on a normal Omarchy install. No extra packages. No sudo or pkexec is req
 
 - Hyprland (`hyprctl`)
 - `grim` (scaled JPEG capture)
-- `jq` (focused monitor name)
 
-Thumbnails are written to `~/.cache/omarchy/workspace-previews/`. The plugin does not install packages and does not change files outside its cache directory and your existing `shell.json` bar layout when you enable it.
+Thumbnails are written to `~/.cache/omarchy/workspace-previews/`, not `/tmp`. The plugin does not install packages and does not change files outside its cache directory and your existing `shell.json` bar layout when you enable it.
 
 ## Remove
 
