@@ -96,7 +96,17 @@ class LiveCaptureTests(unittest.TestCase):
         self.assertIn("preview-helper.py", script)
         self.assertIn('helper" stage', script)
         self.assertIn("commit --jpeg", script)
+        self.assertIn("prepare-dir", script)
         self.assertNotIn(".tmp-ws-", script)
+        self.assertNotIn("mktemp", script)
+
+    def test_wallpaper_stamp_uses_safe_publish(self):
+        script = (ROOT / "update-wallpaper-stamp.sh").read_text()
+        self.assertIn("prepare-dir", script)
+        self.assertIn("read-text", script)
+        self.assertIn("publish", script)
+        self.assertNotIn(".tmp.$$", script)
+        self.assertNotIn(" cat ", script)
 
 
 if __name__ == "__main__":

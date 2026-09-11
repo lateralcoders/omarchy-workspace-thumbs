@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
+import stat
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,6 +81,89 @@ class PreviewHelperTests(unittest.TestCase):
             self.assertEqual(commit.returncode, 0, commit.stderr)
             self.assertFalse(os.path.exists(tmp))
             self.assertEqual(Path(dest).read_bytes(), data)
+
+    def test_prepare_dir_creates_private_dir(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache = os.path.join(folder, "workspace-previews")
+            result = run_helper("prepare-dir", cache)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            st = os.lstat(cache)
+            self.assertTrue(stat.S_ISDIR(st.st_mode))
+            self.assertFalse(stat.S_ISLNK(st.st_mode))
+            self.assertEqual(st.st_uid, os.getuid())
+            self.assertEqual(stat.S_IMODE(st.st_mode), 0o700)
+
+    def test_prepare_dir_refuses_symlink_parent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            real = os.path.join(folder, "real")
+            os.mkdir(real, 0o700)
+            parent = os.path.join(folder, "omarchy")
+            os.symlink(real, parent)
+            leaf = os.path.join(parent, "workspace-previews")
+            result = run_helper("prepare-dir", leaf)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_stage_is_exclusive_nofollow_owned(self):
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            staged = run_helper("stage", folder)
+            self.assertEqual(staged.returncode, 0, staged.stderr)
+            tmp = staged.stdout.decode().strip()
+            st = os.lstat(tmp)
+            self.assertTrue(stat.S_ISREG(st.st_mode))
+            self.assertFalse(stat.S_ISLNK(st.st_mode))
+            self.assertEqual(st.st_uid, os.getuid())
+            self.assertEqual(stat.S_IMODE(st.st_mode), 0o600)
+            again = run_helper("stage", folder)
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertNotEqual(again.stdout.decode().strip(), tmp)
+
+    def test_commit_rejects_symlink_tmp(self):
+        data = jpeg()
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            real = os.path.join(folder, ".pub-notreally")
+            Path(real).write_bytes(data)
+            tmp = os.path.join(folder, ".pub-link")
+            os.symlink(real, tmp)
+            dest = os.path.join(folder, "ws-1.jpg")
+            commit = run_helper("commit", "--jpeg", tmp, dest)
+            self.assertNotEqual(commit.returncode, 0)
+            self.assertFalse(os.path.exists(dest))
+
+    def test_commit_rejects_tmp_outside_dest_dir(self):
+        data = jpeg()
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            other = os.path.join(folder, "other")
+            os.mkdir(other, 0o700)
+            staged = run_helper("stage", other)
+            tmp = staged.stdout.decode().strip()
+            Path(tmp).write_bytes(data)
+            dest = os.path.join(folder, "ws-1.jpg")
+            commit = run_helper("commit", "--jpeg", tmp, dest)
+            self.assertNotEqual(commit.returncode, 0)
+
+    def test_commit_rejects_invalid_jpeg_and_removes_tmp(self):
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            staged = run_helper("stage", folder)
+            tmp = staged.stdout.decode().strip()
+            Path(tmp).write_bytes(b"not-a-jpeg")
+            dest = os.path.join(folder, "ws-1.jpg")
+            commit = run_helper("commit", "--jpeg", tmp, dest)
+            self.assertNotEqual(commit.returncode, 0)
+            self.assertFalse(os.path.exists(tmp))
+            self.assertFalse(os.path.exists(dest))
+
+    def test_read_text_rejects_symlink(self):
+        with tempfile.TemporaryDirectory() as folder:
+            real = os.path.join(folder, "real")
+            Path(real).write_text("secret\n")
+            link = os.path.join(folder, "stamp")
+            os.symlink(real, link)
+            result = run_helper("read-text", link)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_prepare_dir_refuses_symlink(self):
         with tempfile.TemporaryDirectory() as folder:

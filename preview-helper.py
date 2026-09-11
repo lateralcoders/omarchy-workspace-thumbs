@@ -93,22 +93,39 @@ def cmd_read(path: str) -> None:
 
 def ensure_private_dir(path: str) -> None:
     path = os.path.abspath(path)
+    parent = os.path.dirname(path)
+    name = os.path.basename(path)
+    if not name or parent == path:
+        fail("invalid directory")
     try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        parent = os.path.dirname(path)
-        if parent and parent != path:
-            if not os.path.isdir(parent):
-                os.makedirs(parent, mode=0o700, exist_ok=True)
-        os.mkdir(path, 0o700)
-        info = os.lstat(path)
-    if stat.S_ISLNK(info.st_mode):
-        fail("refusing symlink directory")
-    if not stat.S_ISDIR(info.st_mode):
-        fail("not a directory")
-    if info.st_uid != os.getuid():
-        fail("unexpected directory owner")
-    os.chmod(path, 0o700)
+        parent_fd = os.open(
+            parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+    except OSError:
+        fail("refusing symlink or missing parent directory")
+    try:
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        try:
+            dir_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=parent_fd,
+            )
+        except OSError:
+            fail("refusing symlink or missing path")
+    finally:
+        os.close(parent_fd)
+    try:
+        info = os.fstat(dir_fd)
+        if info.st_uid != os.getuid():
+            fail("unexpected directory owner")
+        os.fchmod(dir_fd, 0o700)
+    finally:
+        os.close(dir_fd)
 
 
 def exclusive_temp(directory: str) -> tuple[int, str]:
@@ -204,9 +221,30 @@ def cmd_commit(tmp: str, dest: str, jpeg: bool) -> None:
             data = os.read(fd, MAX_JPEG_BYTES + 1)
             validate_jpeg(data)
         os.fsync(fd)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
+    os.rename(tmp, dest)
+
+
+def cmd_read_text(path: str) -> None:
+    fd = open_regular_nofollow(path, os.O_RDONLY)
+    try:
+        info = check_owned_regular(fd)
+        if info.st_size > 4096:
+            fail("payload exceeds byte ceiling", OVERFLOW_EXIT)
+        data = os.read(fd, 4097)
     finally:
         os.close(fd)
-    os.rename(tmp, dest)
+    sys.stdout.buffer.write(data)
 
 
 def cmd_discard(tmp: str) -> None:
@@ -254,6 +292,11 @@ def main(argv: list[str]) -> None:
         if len(argv) != 3:
             fail("usage: preview-helper.py write PATH")
         cmd_write(argv[2])
+        return
+    if action == "read-text":
+        if len(argv) != 3:
+            fail("usage: preview-helper.py read-text PATH")
+        cmd_read_text(argv[2])
         return
     if action == "prepare-dir":
         if len(argv) != 3:

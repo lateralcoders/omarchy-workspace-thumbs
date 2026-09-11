@@ -12,9 +12,7 @@ path="$(readlink -f "$link" 2>/dev/null || true)"
 [[ -n $path && -e $path ]] || exit 0
 
 current=""
-if [[ -f $stamp ]]; then
-  current="$(python3 "$helper" run 500 4096 -- cat "$stamp" 2>/dev/null || true)"
-fi
+current="$(python3 "$helper" read-text "$stamp" 2>/dev/null || true)"
 current="${current%$'\n'}"
 [[ $path == "$current" ]] && exit 0
 
